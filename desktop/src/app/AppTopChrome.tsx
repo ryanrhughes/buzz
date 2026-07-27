@@ -2,11 +2,16 @@ import * as React from "react";
 import {
   ChevronLeft,
   ChevronRight,
+  Minus,
   PanelLeftClose,
   PanelLeftOpen,
+  Square,
+  X,
 } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { isMacPlatform } from "@/shared/lib/platform";
+import { needsClientWindowControls } from "@/shared/lib/windowControls";
 import { useIsFullscreen } from "@/shared/lib/useIsFullscreen";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
@@ -32,6 +37,70 @@ const HISTORY_ICON_BUTTON_CLASS =
 
 function preventTopChromeWheel(event: WheelEvent) {
   event.preventDefault();
+}
+
+// Linux desktops that expect titlebar buttons get client-drawn window
+// controls (the window itself is undecorated). Tiling compositors, macOS,
+// and Windows resolve to false — see `needsClientWindowControls`.
+function TopChromeWindowControls() {
+  const [show, setShow] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void needsClientWindowControls().then((needed) => {
+      if (!cancelled) {
+        setShow(needed);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!show) {
+    return null;
+  }
+
+  return (
+    <div className="ml-auto flex items-center gap-0.5">
+      <Button
+        aria-label="Minimize"
+        className={TOP_CHROME_ICON_BUTTON_CLASS}
+        data-testid="window-minimize"
+        onClick={() => {
+          void getCurrentWindow().minimize();
+        }}
+        size="icon"
+        variant="ghost"
+      >
+        <Minus />
+      </Button>
+      <Button
+        aria-label="Maximize"
+        className={cn(TOP_CHROME_ICON_BUTTON_CLASS, "[&_svg]:size-[12px]")}
+        data-testid="window-maximize"
+        onClick={() => {
+          void getCurrentWindow().toggleMaximize();
+        }}
+        size="icon"
+        variant="ghost"
+      >
+        <Square />
+      </Button>
+      <Button
+        aria-label="Close window"
+        className={TOP_CHROME_ICON_BUTTON_CLASS}
+        data-testid="window-close"
+        onClick={() => {
+          void getCurrentWindow().close();
+        }}
+        size="icon"
+        variant="ghost"
+      >
+        <X />
+      </Button>
+    </div>
+  );
 }
 
 function TopChromeSidebarTrigger() {
@@ -131,6 +200,7 @@ export function AppTopChrome({
           <ChevronRight />
         </Button>
       </div>
+      {!isFullscreen && <TopChromeWindowControls />}
     </div>
   );
 }
