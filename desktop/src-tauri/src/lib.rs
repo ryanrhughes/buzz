@@ -133,8 +133,56 @@ async fn wait_for_stable_initial_window_geometry<R: tauri::Runtime>(window: &tau
     eprintln!("buzz-desktop: initial window geometry did not settle before reveal timeout");
 }
 
+/// On NVIDIA driver stacks, WebKitGTK's DMA-BUF renderer commits buffers to
+/// a Wayland surface on which NVIDIA's egl-wayland has registered explicit
+/// sync (`wp_linux_drm_syncobj_surface_v1`) — but without attaching acquire
+/// timeline points. Compositors that enforce the syncobj protocol (e.g.
+/// Hyprland 0.56+) then kill the connection with a protocol error
+/// ("Missing acquire timeline"), so the app dies on launch.
+///
+/// Setting `__NV_DISABLE_EXPLICIT_SYNC=1` (an egl-wayland escape hatch)
+/// keeps the GPU-accelerated DMA-BUF renderer working by falling back to
+/// implicit sync, which was the status quo before compositors adopted the
+/// syncobj protocol. This is strictly better than
+/// `WEBKIT_DISABLE_DMABUF_RENDERER=1`, which drops the webview to CPU
+/// rasterization. Detect an NVIDIA GPU and set the variable before the
+/// first webview is created, so NVIDIA users don't need a wrapper script.
+/// An explicit value for either variable in the environment is respected
+/// and never overridden.
+#[cfg(target_os = "linux")]
+fn workaround_nvidia_webkit_explicit_sync_crash() {
+    const NV_EXPLICIT_SYNC_VAR: &str = "__NV_DISABLE_EXPLICIT_SYNC";
+    const WEBKIT_DMABUF_VAR: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+    const NVIDIA_PCI_VENDOR_ID: &str = "0x10de";
+
+    if std::env::var_os(NV_EXPLICIT_SYNC_VAR).is_some()
+        || std::env::var_os(WEBKIT_DMABUF_VAR).is_some()
+    {
+        return;
+    }
+
+    // The nvidia kernel module (proprietary and open) exposes this file; the
+    // /sys scan covers the module being present but not yet loaded for a
+    // secondary GPU.
+    let nvidia_present = std::path::Path::new("/proc/driver/nvidia/version").exists()
+        || std::fs::read_dir("/sys/class/drm").is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                std::fs::read_to_string(entry.path().join("device/vendor"))
+                    .is_ok_and(|vendor| vendor.trim() == NVIDIA_PCI_VENDOR_ID)
+            })
+        });
+
+    if nvidia_present {
+        std::env::set_var(NV_EXPLICIT_SYNC_VAR, "1");
+        eprintln!("buzz-desktop: NVIDIA GPU detected, set {NV_EXPLICIT_SYNC_VAR}=1");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    workaround_nvidia_webkit_explicit_sync_crash();
+
     // mesh-llm's async chains (model download, node start/join) overflow
     // tokio's default 2 MiB worker stacks — a stack-guard SIGABRT, not a
     // panic. Upstream mesh-llm and mesh-console both run on 8 MiB worker
