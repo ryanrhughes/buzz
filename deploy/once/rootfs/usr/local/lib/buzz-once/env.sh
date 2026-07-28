@@ -16,7 +16,10 @@ fi
 export RELAY_URL="${RELAY_URL:-$WS_SCHEME://$BUZZ_DOMAIN}"
 export BUZZ_MEDIA_BASE_URL="${BUZZ_MEDIA_BASE_URL:-$HTTP_SCHEME://$BUZZ_DOMAIN/media}"
 export BUZZ_MEDIA_SERVER_DOMAIN="${BUZZ_MEDIA_SERVER_DOMAIN:-$BUZZ_DOMAIN}"
-export BUZZ_CORS_ORIGINS="${BUZZ_CORS_ORIGINS:-$HTTP_SCHEME://$BUZZ_DOMAIN}"
+# CORS stays permissive unless explicitly set: desktop clients originate from
+# tauri://localhost etc., and relay auth is cryptographic (NIP-42/98), not
+# cookie-based — restricting origins here just breaks the join flow.
+[ -n "${BUZZ_CORS_ORIGINS:-}" ] && export BUZZ_CORS_ORIGINS
 
 export DATABASE_URL="postgres://buzz:${POSTGRES_PASSWORD}@127.0.0.1:5432/buzz"
 export REDIS_URL="redis://:${REDIS_PASSWORD}@127.0.0.1:6379"

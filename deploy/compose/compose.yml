@@ -46,6 +46,15 @@ services:
     networks:
       - buzz-net
 
+  pair-relay:
+    image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:main}
+    entrypoint: ["/usr/local/bin/buzz-pair-relay"]
+    environment:
+      BUZZ_PAIR_RELAY_BIND_ADDR: 0.0.0.0:5000
+    restart: unless-stopped
+    networks:
+      - buzz-net
+
   postgres:
     image: postgres:17-alpine
     environment:

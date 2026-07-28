@@ -1,5 +1,12 @@
 {$BUZZ_DOMAIN} {
   encode zstd gzip
 
-  reverse_proxy relay:3000
+  # Device pairing runs as a sidecar WS service; clients use the /pair
+  # convention (and NIP-11 pairing_relay_url when BUZZ_PAIRING_RELAY_URL set).
+  handle /pair* {
+    reverse_proxy pair-relay:5000
+  }
+  handle {
+    reverse_proxy relay:3000
+  }
 }
