@@ -1,0 +1,11 @@
+#!/bin/bash
+# ONCE pre-backup hook: dump Postgres into /storage so the platform's
+# /storage snapshot is self-contained. Media, git, and redis AOF are already
+# plain files under /storage.
+set -euo pipefail
+. /usr/local/lib/buzz-once/env.sh
+s6-setuidgid postgres /usr/lib/postgresql/17/bin/pg_dump \
+  "dbname=buzz user=buzz host=127.0.0.1 password=$POSTGRES_PASSWORD" \
+  -Fc -f /storage/backups/buzz.dump.tmp
+mv /storage/backups/buzz.dump.tmp /storage/backups/buzz.dump
+echo "pre-backup: pg_dump complete ($(stat -c%s /storage/backups/buzz.dump) bytes)"

@@ -1,0 +1,11 @@
+#!/command/with-contenv bash
+. /usr/local/lib/buzz-once/env.sh
+# Wait for postgres to accept connections before handing off.
+for i in $(seq 1 60); do
+  if s6-setuidgid postgres /usr/lib/postgresql/17/bin/pg_isready -q -h 127.0.0.1; then break; fi
+  sleep 1
+done
+# initdb creates the cluster but not the app database; idempotent create.
+PGPASSWORD="$POSTGRES_PASSWORD" /usr/lib/postgresql/17/bin/createdb \
+  -h 127.0.0.1 -U buzz buzz 2>/dev/null || true
+exec s6-setuidgid buzz /usr/local/bin/buzz-relay
