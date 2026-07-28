@@ -65,6 +65,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/.well-known/nostr.json", get(api::nip05::nostr_nip05))
         // Health endpoints
         .route("/health", get(health_handler))
+        // ONCE platform healthcheck — same handler, platform-mandated path.
+        .route("/up", get(health_handler))
         .route("/_liveness", get(liveness_handler))
         .route("/_readiness", get(readiness_handler))
         // Nostr HTTP bridge (NIP-98 auth)

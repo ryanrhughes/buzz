@@ -1,0 +1,5 @@
+#!/command/with-contenv bash
+. /usr/local/lib/buzz-once/env.sh
+exec s6-setuidgid redis /usr/bin/redis-server \
+  --dir /storage/redis --appendonly yes --bind 127.0.0.1 \
+  --requirepass "$REDIS_PASSWORD" --maxmemory 256mb
