@@ -1,0 +1,4 @@
+#!/command/with-contenv bash
+. /usr/local/lib/buzz-once/env.sh
+export MINIO_ROOT_USER="$BUZZ_S3_ACCESS_KEY" MINIO_ROOT_PASSWORD="$BUZZ_S3_SECRET_KEY"
+exec s6-setuidgid buzz /usr/local/bin/minio server /storage/minio --address 127.0.0.1:9000
