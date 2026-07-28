@@ -1,0 +1,10 @@
+#!/bin/bash
+# ONCE post-restore hook: PGDATA came back with the /storage snapshot and is
+# authoritative; the pg_dump is belt-and-braces for cross-version restores.
+# If PGDATA is missing but a dump exists (e.g. selective restore), rebuild.
+set -euo pipefail
+if [ ! -s /storage/postgres/17/PG_VERSION ] && [ -s /storage/backups/buzz.dump ]; then
+  echo "post-restore: PGDATA missing, will restore from dump on next boot" >&2
+  touch /storage/config/restore-from-dump
+fi
+exit 0
