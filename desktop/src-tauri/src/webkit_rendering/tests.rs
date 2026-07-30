@@ -36,7 +36,7 @@ fn env_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {
 /// The variables a plan would set, or `None` for a plan that sets nothing.
 fn applied(plan: &Plan) -> Option<&[&str]> {
     match plan {
-        Plan::Apply { vars, .. } => Some(vars),
+        Plan::Apply { vars, .. } => Some(vars.as_slice()),
         _ => None,
     }
 }
@@ -44,14 +44,11 @@ fn applied(plan: &Plan) -> Option<&[&str]> {
 // ── Detection ───────────────────────────────────────────────────────────────
 
 #[test]
-fn test_nvidia_gpu_disables_the_dmabuf_renderer() {
+fn test_nvidia_gpu_disables_explicit_sync_and_keeps_the_dmabuf_renderer() {
     let drm = drm(&["0x10de"]);
     let plan = plan(NO_ARGS, &env_from(&[]), drm.path());
 
-    assert_eq!(
-        applied(&plan),
-        Some(&["WEBKIT_DISABLE_DMABUF_RENDERER"][..])
-    );
+    assert_eq!(applied(&plan), Some(&["__NV_DISABLE_EXPLICIT_SYNC"][..]));
     let Plan::Apply { why, .. } = &plan else {
         unreachable!()
     };
@@ -66,7 +63,7 @@ fn test_an_nvidia_gpu_alongside_another_vendor_still_counts() {
 
     assert_eq!(
         applied(&plan(NO_ARGS, &env_from(&[]), drm.path())),
-        Some(&["WEBKIT_DISABLE_DMABUF_RENDERER"][..])
+        Some(&["__NV_DISABLE_EXPLICIT_SYNC"][..])
     );
 }
 
@@ -76,7 +73,7 @@ fn test_the_vendor_id_match_ignores_case() {
 
     assert_eq!(
         applied(&plan(NO_ARGS, &env_from(&[]), drm.path())),
-        Some(&["WEBKIT_DISABLE_DMABUF_RENDERER"][..])
+        Some(&["__NV_DISABLE_EXPLICIT_SYNC"][..])
     );
 }
 
@@ -133,7 +130,26 @@ fn test_a_device_without_a_vendor_file_is_skipped_not_fatal() {
 
     assert_eq!(
         applied(&plan(NO_ARGS, &env_from(&[]), root.path())),
-        Some(&["WEBKIT_DISABLE_DMABUF_RENDERER"][..])
+        Some(&["__NV_DISABLE_EXPLICIT_SYNC"][..])
+    );
+}
+
+#[test]
+fn test_an_nvidia_appimage_launch_applies_both_signals_workarounds() {
+    // Under an AppImage the dmabuf renderer is disabled anyway, so the
+    // explicit-sync fallback is moot but harmless — the union keeps each
+    // signal's reasoning independent.
+    let drm = drm(&["0x10de"]);
+    let env = env_from(&[("APPIMAGE", "/home/u/Buzz.AppImage")]);
+
+    assert_eq!(
+        applied(&plan(NO_ARGS, &env, drm.path())),
+        Some(
+            &[
+                "__NV_DISABLE_EXPLICIT_SYNC",
+                "WEBKIT_DISABLE_DMABUF_RENDERER"
+            ][..]
+        )
     );
 }
 
@@ -178,6 +194,20 @@ fn test_a_user_set_compositing_variable_also_stands_the_heuristic_down() {
     ));
 }
 
+#[test]
+fn test_a_user_set_explicit_sync_variable_also_stands_the_heuristic_down() {
+    // Someone debugging NVIDIA sync behaviour with an explicit
+    // `__NV_DISABLE_EXPLICIT_SYNC=0` owns the decision, same as the WebKit
+    // variables.
+    let drm = drm(&["0x10de"]);
+    let env = env_from(&[(NV_EXPLICIT_SYNC, "0")]);
+
+    assert!(matches!(
+        plan(NO_ARGS, &env, drm.path()),
+        Plan::Leave { .. }
+    ));
+}
+
 // ── --safe-rendering ────────────────────────────────────────────────────────
 
 #[test]
@@ -193,7 +223,8 @@ fn test_safe_rendering_applies_the_safest_set_without_any_hardware_signal() {
         Some(
             &[
                 "WEBKIT_DISABLE_DMABUF_RENDERER",
-                "WEBKIT_DISABLE_COMPOSITING_MODE"
+                "WEBKIT_DISABLE_COMPOSITING_MODE",
+                "__NV_DISABLE_EXPLICIT_SYNC"
             ][..]
         )
     );
