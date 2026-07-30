@@ -15,12 +15,19 @@
 //! * AppImage packaging, where linuxdeploy's AppRun hook pins `GDK_BACKEND=x11`
 //!   and the dmabuf renderer buys nothing on that XWayland path (#2338).
 //!
-//! `--safe-rendering` is the manual escape hatch for a machine neither signal
-//! recognises; it also disables accelerated compositing, for that launch only.
+//! Each signal applies the cheapest variable that neutralises its failure mode.
+//! On NVIDIA the web process dies because egl-wayland registers Wayland
+//! explicit sync (`wp_linux_drm_syncobj_surface_v1`) on the surface but WebKit
+//! commits dmabuf buffers without acquire timeline points, so compositors that
+//! enforce the protocol kill the connection ("Missing acquire timeline").
+//! `__NV_DISABLE_EXPLICIT_SYNC=1` makes egl-wayland fall back to implicit
+//! sync — the pre-syncobj status quo — and keeps the GPU-accelerated dmabuf
+//! path, where `WEBKIT_DISABLE_DMABUF_RENDERER=1` would drop the whole webview
+//! to shared-memory rendering. The AppImage path is already pinned to XWayland,
+//! where dmabuf buys nothing, so it keeps the blunter renderer opt-out.
 //!
-//! This is the shape the Tauri ecosystem converged on: clash-verge-rev's
-//! `utils/linux/workarounds.rs` and screenpipe's `linux_webkit_env.rs` both set
-//! the same variable from the same signals at the same point in startup.
+//! `--safe-rendering` is the manual escape hatch for a machine neither signal
+//! recognises; it applies everything this module owns, for that launch only.
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
@@ -38,17 +45,26 @@ const DRM_ROOT: &str = "/sys/class/drm";
 const DISABLE_DMABUF: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
 /// Drops accelerated compositing as well. `--safe-rendering` only.
 const DISABLE_COMPOSITING: &str = "WEBKIT_DISABLE_COMPOSITING_MODE";
+/// Makes NVIDIA's egl-wayland fall back to implicit sync instead of
+/// registering Wayland explicit sync WebKit never satisfies. Keeps the
+/// dmabuf renderer alive on NVIDIA where `DISABLE_DMABUF` would not.
+const NV_EXPLICIT_SYNC: &str = "__NV_DISABLE_EXPLICIT_SYNC";
 
-/// What the heuristic applies: the #2338 workaround alone, matching the
+/// What the NVIDIA signal applies: disable explicit sync, keep the
+/// GPU-accelerated dmabuf path. Verified on RTX 5090 + nvidia-open 610 +
+/// Hyprland 0.56, where the explicit-sync fallback alone stops the crash.
+const NVIDIA_VARS: [&str; 1] = [NV_EXPLICIT_SYNC];
+
+/// What the AppImage signal applies: the #2338 workaround, matching the
 /// ecosystem precedents. `DISABLE_COMPOSITING` is deliberately not here — no
 /// report has isolated it as necessary, and it costs more rendering than this.
-const HEURISTIC: [&str; 1] = [DISABLE_DMABUF];
+const APPIMAGE_VARS: [&str; 1] = [DISABLE_DMABUF];
 
 /// What `--safe-rendering` applies, which is also every variable this module may
 /// set and therefore every variable a user assignment takes away from it. Being
 /// the same list is the invariant: nothing outside it is ever written, so a user
 /// value for any other WebKit variable is not a conflict.
-const OWNED: [&str; 2] = [DISABLE_DMABUF, DISABLE_COMPOSITING];
+const OWNED: [&str; 3] = [DISABLE_DMABUF, DISABLE_COMPOSITING, NV_EXPLICIT_SYNC];
 
 /// Reads one environment variable. Injected so the decision is testable without
 /// mutating the process environment. `OsString` rather than `String` because
@@ -60,7 +76,7 @@ type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<OsString>;
 enum Plan {
     /// Set each of these to `1`, then report `why`.
     Apply {
-        vars: &'static [&'static str],
+        vars: Vec<&'static str>,
         why: String,
     },
     /// Change nothing, and report `why`.
@@ -84,7 +100,7 @@ pub fn apply() -> Result<(), String> {
         Path::new(DRM_ROOT),
     ) {
         Plan::Apply { vars, why } => {
-            for var in vars {
+            for var in &vars {
                 // Safe here and only here — see the doc comment above.
                 std::env::set_var(var, "1");
             }
@@ -132,26 +148,34 @@ fn plan(
 
     if safe_rendering {
         return Plan::Apply {
-            vars: &OWNED,
+            vars: OWNED.to_vec(),
             why: format!("{SAFE_RENDERING} requested, this launch only"),
         };
     }
 
-    let signals = [
-        (nvidia_gpu(drm_root), "NVIDIA GPU"),
-        (env("APPIMAGE").is_some(), "AppImage"),
+    let signals: [(bool, &str, &[&str]); 2] = [
+        (nvidia_gpu(drm_root), "NVIDIA GPU", &NVIDIA_VARS),
+        (env("APPIMAGE").is_some(), "AppImage", &APPIMAGE_VARS),
     ];
-    let hits: Vec<&str> = signals
-        .iter()
-        .filter_map(|(hit, label)| hit.then_some(*label))
-        .collect();
+    let mut hits: Vec<&str> = Vec::new();
+    let mut vars: Vec<&'static str> = Vec::new();
+    for (hit, label, signal_vars) in signals {
+        if hit {
+            hits.push(label);
+            for var in signal_vars {
+                if !vars.contains(var) {
+                    vars.push(var);
+                }
+            }
+        }
+    }
 
     match hits.is_empty() {
         true => Plan::Leave {
             why: "no NVIDIA GPU and not an AppImage".to_string(),
         },
         false => Plan::Apply {
-            vars: &HEURISTIC,
+            vars,
             why: hits.join(", "),
         },
     }
