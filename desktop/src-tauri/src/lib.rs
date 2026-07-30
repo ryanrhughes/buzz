@@ -373,6 +373,16 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             tray_menu::init(&app_handle)?;
 
+            // The Overlay title-bar style in tauri.conf.json is macOS-only, so
+            // Linux falls back to a stock decorated window whose GTK titlebar
+            // duplicates the app's own top chrome (which already has a drag
+            // region). Drop the native decorations; window management stays
+            // with the compositor (e.g. Hyprland keybinds).
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.set_decorations(false);
+            }
+
             // ── Phase 2: boot-time sentinel wipe ──────────────────────────────
             // Must run before migrations and identity resolution so the wipe
             // completes atomically on crash recovery.
@@ -667,6 +677,7 @@ pub fn run() {
             unarchive_builderlab_community,
             transfer_builderlab_community,
             title_bar_double_click,
+            needs_client_window_controls,
             get_identity,
             get_nsec,
             import_identity,

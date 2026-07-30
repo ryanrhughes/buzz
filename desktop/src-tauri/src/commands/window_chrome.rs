@@ -15,6 +15,44 @@ pub fn perform_sidebar_default_haptic() {
     }
 }
 
+/// True when the frontend should draw its own window-control buttons
+/// (minimize / maximize / close) in the top chrome.
+///
+/// Linux runs without native decorations (`set_decorations(false)` in setup),
+/// so desktops whose windows conventionally carry titlebar buttons (GNOME,
+/// KDE, XFCE, …) need client-side replacements. Tiling compositors (Hyprland,
+/// sway, river, niri, i3, …) manage windows from the keyboard and draw no
+/// buttons, so none are shown there. macOS keeps its native traffic lights
+/// and Windows keeps native decorations — both return false.
+#[tauri::command]
+pub fn needs_client_window_controls() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+            || std::env::var_os("SWAYSOCK").is_some()
+        {
+            return false;
+        }
+
+        const TILING_DESKTOPS: &[&str] = &[
+            "hyprland", "sway", "river", "niri", "i3", "bspwm", "dwm", "awesome", "xmonad", "qtile",
+        ];
+        // XDG_CURRENT_DESKTOP is a colon-separated list (e.g. "ubuntu:GNOME").
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+            .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
+            .unwrap_or_default()
+            .to_lowercase();
+        !desktop
+            .split(':')
+            .any(|segment| TILING_DESKTOPS.contains(&segment.trim()))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
 /// Performs the window action matching the macOS "double-click a window's
 /// title bar to" preference (`AppleActionOnDoubleClick`).
 ///
